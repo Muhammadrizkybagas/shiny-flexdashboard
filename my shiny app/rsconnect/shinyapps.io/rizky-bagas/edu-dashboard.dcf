@@ -1,0 +1,12 @@
+name: edu-dashboard
+title: edu-dashboard
+username: rizky-bagas
+account: rizky-bagas
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 14899685
+bundleId: 10436034
+url: https://rizky-bagas.shinyapps.io/edu-dashboard/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

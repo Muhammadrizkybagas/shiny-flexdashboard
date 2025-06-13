@@ -1,0 +1,613 @@
+---
+title: "Survey Pembelajaran Daring"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: cosmo
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(flexdashboard)
+library(tidyverse)
+library(tidyr)
+library(highcharter)
+library(gt)
+library(htmltools)
+library(viridis)
+library(DT)
+library(readr)
+library(stringr)
+library(qcc)
+library(DiagrammeR)
+library(moments)
+library(forcats)
+library(stats19)
+
+
+
+tags$style(HTML("
+  .section.level1 {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+"))
+
+```
+
+
+Check Sheet
+=======================================================================
+
+Column {data-width=450}
+-----------------------------------------------------------------------
+
+### Masalah Utama
+
+```{r}
+
+# Baca dataset
+data_mahasiswa <- read.csv("dataset_daring.csv")
+
+# Buat check sheet berdasarkan Tantangan_Utama
+check_sheet <- data_mahasiswa %>%
+  group_by(Tantangan_Utama) %>%
+  summarise(Jumlah = n()) %>%
+  arrange(desc(Jumlah))
+
+# Tampilkan check sheet dalam tabel interaktif
+DT::datatable(
+  check_sheet,
+  options = list(pageLength = 10),
+  caption = "Frekuensi Masalah Utama dalam Pembelajaran Daring"
+)
+
+```
+
+
+Column {.tabset .tabset-fade data-width=650}
+-----------------------------------------------------------------------
+
+### Frekuensi Masalah Utama
+
+```{r}
+
+# Data frekuensi
+data_freq <- data_mahasiswa %>%
+  count(Tantangan_Utama, name = "Jumlah") %>%
+  arrange(Jumlah)  # urut dari yang sedikit ke banyak
+
+# Warna dari viridis (bisa pilih: "viridis", "plasma", "magma", "inferno", "cividis")
+warna_viridis <- viridis(n = nrow(data_freq), option = "plasma")
+
+# Bar chart horizontal
+highchart() %>%
+  hc_chart(type = "bar") %>%
+  hc_title(text = "Frekuensi Tantangan Utama") %>%
+  hc_xAxis(categories = data_freq$Tantangan_Utama,
+           title = list(text = "Tantangan Utama")) %>%
+  hc_yAxis(title = list(text = "Jumlah")) %>%
+  hc_add_series(
+    name = "Jumlah",
+    data = map2(data_freq$Jumlah, warna_viridis, ~ list(y = .x, color = .y))
+  ) %>%
+  hc_tooltip(pointFormat = "<b>Jumlah Mahasiswa:</b> {point.y}<br>") %>%
+  hc_credits(enabled = TRUE, text = "@byoreee") %>%
+  hc_add_theme(hc_theme_google())
+```
+
+
+
+Control Chart
+=======================================================================
+
+Column {.tabset .tabset-fade data-width=350 data-height=610}
+-----------------------------------------------------------------------
+
+### Stabilitas Kepuasan Mahasiswa {.no-padding}
+
+```{r}
+
+data_mahasiswa <- read.csv("dataset_daring.csv", stringsAsFactors = FALSE)
+
+# === Konversi Interaktif_Daring ke Numerik ===
+data_mahasiswa <- data_mahasiswa %>%
+  mutate(Interaktif_Daring_Numerik = case_when(
+    Interaktif_Daring == "Selalu" ~ 5,
+    Interaktif_Daring == "Sering" ~ 4,
+    Interaktif_Daring == "Kadang-kadang" ~ 3,
+    Interaktif_Daring == "Jarang" ~ 2,
+    Interaktif_Daring == "Tidak Pernah" ~ 1,
+    TRUE ~ NA_real_
+  ))
+
+# === Buat skor kepuasan gabungan ===
+data_mahasiswa <- data_mahasiswa %>%
+  mutate(across(c(Perangkat_Andal, Koneksi_Stabil, Interaktif_Daring_Numerik, 
+                  Responsivitas_Dosen, Motivasi_Daring, Materi_Menarik), as.numeric)) %>%
+  mutate(Skor_Kepuasan = rowMeans(select(., Perangkat_Andal, Koneksi_Stabil, 
+                                         Interaktif_Daring_Numerik, Responsivitas_Dosen, 
+                                         Motivasi_Daring, Materi_Menarik), na.rm = TRUE))
+
+# === Kelompokkan per Semester ===
+data_kelompok <- data_mahasiswa %>%
+  group_by(Semester) %>%
+  summarise(
+    jumlah_mahasiswa = n(),
+    rata_rata_kepuasan = mean(Skor_Kepuasan, na.rm = TRUE),
+    data_kepuasan = list(Skor_Kepuasan)
+  ) %>%
+  filter(jumlah_mahasiswa >= 3) # pastikan cukup data
+
+# === Konversi list data_kepuasan menjadi matriks ===
+# Cari jumlah maksimum mahasiswa di satu semester untuk menentukan jumlah kolom
+max_size <- max(data_kelompok$jumlah_mahasiswa)
+
+# Buat matriks dengan mengisi NA untuk kelompok dengan jumlah data lebih sedikit
+data_matrix <- matrix(NA, nrow = nrow(data_kelompok), ncol = max_size)
+for (i in 1:nrow(data_kelompok)) {
+  skor <- unlist(data_kelompok$data_kepuasan[[i]])
+  data_matrix[i, 1:length(skor)] <- skor
+}
+
+# === Hitung Batas Kendali (X-bar) ===
+qcc_obj <- qcc(
+  data = data_matrix,
+  type = "xbar",
+  sizes = data_kelompok$jumlah_mahasiswa,
+  plot = FALSE
+)
+
+cl <- qcc_obj$center
+ucl <- qcc_obj$limits[1, "UCL"]
+lcl <- qcc_obj$limits[1, "LCL"]
+
+# === Identifikasi Outlier ===
+data_chart <- data.frame(
+  semester = data_kelompok$Semester,
+  rata_rata_kepuasan = round(data_kelompok$rata_rata_kepuasan, 2)
+) %>%
+  mutate(Outlier = ifelse(rata_rata_kepuasan > ucl | rata_rata_kepuasan < lcl, "Ya", "Tidak"))
+
+# === Buat chart interaktif dengan garis batas kendali yang jelas ===
+chart_control <- hchart(
+  data_chart,
+  "line",
+  hcaes(x = semester, y = rata_rata_kepuasan),
+  name = "Rata-rata Kepuasan Mahasiswa"
+) %>%
+  hc_add_series(
+    data = data.frame(x = data_chart$semester, y = rep(ucl, nrow(data_chart))),
+    type = "line",
+    name = "UCL",
+    color = "red",
+    dashStyle = "Dash",
+    marker = list(enabled = FALSE),
+    enableMouseTracking = FALSE
+  ) %>%
+  hc_add_series(
+    data = data.frame(x = data_chart$semester, y = rep(lcl, nrow(data_chart))),
+    type = "line",
+    name = "LCL",
+    color = "red",
+    dashStyle = "Dash",
+    marker = list(enabled = FALSE),
+    enableMouseTracking = FALSE
+  ) %>%
+  hc_add_series(
+    data = data.frame(x = data_chart$semester, y = rep(cl, nrow(data_chart))),
+    type = "line",
+    name = "CL",
+    color = "blue",
+    dashStyle = "Dash",
+    marker = list(enabled = FALSE),
+    enableMouseTracking = FALSE
+  ) %>%
+  hc_add_series(
+    data = data_chart,
+    type = "scatter",
+    hcaes(x = semester, y = rata_rata_kepuasan),
+    name = "Data Kepuasan",
+    marker = list(
+      radius = 5,
+      symbol = "circle",
+      fillColor = ifelse(data_chart$Outlier == "Ya", "red", viridis::viridis(1)[1])
+    ),
+    zIndex = 10
+  ) %>%
+  hc_yAxis(
+    title = list(text = "Rata-rata Skor Kepuasan")
+  ) %>%
+  hc_xAxis(
+    title = list(text = "Semester"),
+    type = "category"
+  ) %>%
+  hc_tooltip(
+    pointFormat = "<b>Semester {point.x}</b><br>Rata-rata Kepuasan: {point.y:.2f}<br>Outlier: {point.Outlier}"
+  ) %>%
+  hc_title(
+    text = "Stabilitas Kepuasan Mahasiswa terhadap Pembelajaran Daring per Semester"
+  ) %>%
+  hc_subtitle(
+    text = "Garis merah putus-putus menunjukkan batas kendali (UCL/LCL)"
+  ) %>%
+  hc_legend(
+    enabled = TRUE,
+    align = "right",
+    verticalAlign = "top",
+    layout = "vertical"
+  ) %>%
+  hc_add_theme(hc_theme_google())
+
+chart_control
+
+```
+
+Column {.tabset .tabset-fade data-width=350 data-height=610}
+------------------------------------------------------------------
+
+### Tabel Kepuasan Mahasiswa
+
+```{r}
+# === Buat tabel interaktif ===
+tabel_kepuasan <- data.frame(
+  Semester = data_kelompok$Semester,
+  Rata_Rata_Kepuasan = round(data_kelompok$rata_rata_kepuasan, 2),
+  Jumlah_Mahasiswa = data_kelompok$jumlah_mahasiswa,
+  Status = case_when(
+    data_kelompok$rata_rata_kepuasan > ucl ~ "Di atas UCL",
+    data_kelompok$rata_rata_kepuasan < lcl ~ "Di bawah LCL",
+    TRUE ~ "Dalam Batas Kendali"
+  )
+)
+
+datatable(tabel_kepuasan, options = list(pageLength = 10), rownames = FALSE)
+```
+
+Fishbone Diagram  
+=======================================================================
+
+Column {.tabset .tabset-fade data-width=350 data-height=610}
+------------------------------------------------------------------
+
+### Penyebab Pembelajaran Daring Rendah
+
+```{r}
+grViz("
+digraph fishbone {
+  graph [layout = dot, rankdir = LR]
+
+  # Masalah utama
+  node [fontname=Helvetica, fontsize=25, style=filled]
+  Masalah [label='Efektivitas Pembelajaran Daring yang Rendah', shape=ellipse, fillcolor=lightcoral, width=5.0, height=1.2]
+
+  # Kategori penyebab
+  node [shape=diamond, width=2.5, height=1.0, fillcolor='#FFD700']
+  A1 [label='Manusia']
+  A2 [label='Teknologi']
+  A3 [label='Metode']
+  A4 [label='Lingkungan']
+  A5 [label='Materi']
+  
+  # Sub-penyebab
+  node [shape=ellipse, width=2.5, height=0.6, fillcolor='#90EE90']
+  A1a [label='Kurang diskusi dengan teman']
+  A1b [label='Dosen kurang menguasai teknologi']
+
+  A2a [label='Platform tidak ramah pengguna']
+  A2b [label='Kendala perangkat']
+
+  A3a [label='Interaksi daring tidak optimal']
+  A3b [label='Sulit mengatur waktu']
+
+  A4a [label='Akses internet terbatas']
+  A4b [label='kurang kondusif']
+  A4c [label='Terlalu berisik']
+
+  A5a [label='Materi sulit dipahami']
+  A5b [label='Pembelajaran membosankan']
+
+  # Hubungan antar elemen
+  A1 -> Masalah
+  A2 -> Masalah
+  A3 -> Masalah
+  A4 -> Masalah
+  A5 -> Masalah
+
+  A1a -> A1
+  A1b -> A1
+
+  A2a -> A2
+  A2b -> A2
+
+  A3a -> A3
+  A3b -> A3
+
+  A4a -> A4
+  A4b -> A4
+  A4c -> A4
+
+  A5a -> A5
+  A5b -> A5
+}
+")
+```
+
+
+Flowchart Process
+=======================================================================
+
+Column {.tabset .tabset-fade data-width=350 data-height=610}
+------------------------------------------------------------------
+
+### Flowchart Mengikuti Pembelajaran Daring
+
+```{r}
+
+flowchart <- grViz("
+digraph learning_flowchart {
+  
+  # Global settings
+  graph [layout = dot, rankdir = TB, fontname = 'Helvetica']
+  node [shape = rectangle, style = filled, fillcolor = 'lightblue', fontname = 'Helvetica']
+  edge [fontname = 'Helvetica', arrowsize = 0.8]
+  
+  # Nodes (Process Steps)
+  start [label = 'Start', shape = oval, fillcolor = 'greenyellow']
+  prep [label = 'Persiapan Perangkat']
+  device_check [label = 'Perangkat Aman?', shape = diamond, fillcolor = 'gold']
+  conn_check [label = 'Cek Koneksi', shape = diamond, fillcolor = 'gold']
+  tech_issue [label = 'Alami Kendala Teknis', fillcolor = 'salmon']
+  network_issue [label = 'Alami Masalah Jaringan', fillcolor = 'salmon']
+  contact_tech [label = 'Hubungi Teknisi']
+  try_fix [label = 'Coba Perbaiki']
+  attend_class [label = 'Mengikuti Kelas Daring']
+  interactive_check [label = 'Interaktif?', shape = diamond, fillcolor = 'gold']
+  participate [label = 'Aktif Berpartisipasi', fillcolor = '#90EE90']
+  comprehension [label = 'Alami Kendala Pemahaman', fillcolor = 'salmon']
+  motivation [label = 'Kurang Motivasi', fillcolor = 'salmon']
+  find_material [label = 'Cari Materi Tambahan']
+  find_motivation [label = 'Cari Motivasi Eksternal']
+  eval_comp [label = 'Evaluasi Pemahaman']
+  eval_motiv [label = 'Evaluasi Motivasi']
+  end [label = 'End', shape = oval, fillcolor = 'coral']
+  
+  # Edges (Connections)
+  start -> prep
+  prep -> device_check
+  device_check -> conn_check [label = ' Ya']
+  device_check -> tech_issue [label = ' Tidak']
+  conn_check -> attend_class [label = ' Ya']
+  conn_check -> network_issue [label = ' Tidak']
+  tech_issue -> contact_tech
+  network_issue -> try_fix
+  contact_tech -> prep
+  try_fix -> prep
+  attend_class -> interactive_check
+  interactive_check -> participate [label = ' Ya']
+  interactive_check -> comprehension [label = ' Tidak', xlabel = '  ']
+  participate -> eval_comp
+  comprehension -> find_material
+  find_material -> eval_comp
+  eval_comp -> end
+  interactive_check -> motivation [label = ' Tidak', xlabel = '  ']
+  motivation -> find_motivation
+  find_motivation -> eval_motiv
+  eval_motiv -> end
+  
+  # Additional formatting
+  {rank = same; tech_issue; network_issue}
+  {rank = same; comprehension; motivation}
+  {rank = same; find_material; find_motivation}
+  {rank = same; eval_comp; eval_motiv}
+}
+")
+
+# Menampilkan Flowchart
+flowchart
+
+```
+
+
+Histogram
+=======================================================================
+
+Column 
+------------------------------------------------------------------
+
+### Penyebab Pembelajaran Daring Rendah
+
+```{r}
+# 1. Baca data
+df <- read.csv("dataset_daring.csv", stringsAsFactors = FALSE)
+
+# 2. Ambil & bersihkan kolom IPK
+ipk_data <- df %>%
+  mutate(IPK_Terakhir = as.numeric(IPK_Terakhir)) %>%
+  filter(!is.na(IPK_Terakhir)) %>%
+  pull(IPK_Terakhir)
+
+# 3. Histogram
+hist_info <- hist(ipk_data, breaks = 30, plot = FALSE)
+viridis_colors <- viridis(length(hist_info$counts), option = "D")
+
+hist_df <- data.frame(
+  x = hist_info$mids,
+  y = hist_info$counts,
+  color = viridis_colors
+)
+
+# 4. Density (disesuaikan dengan skala histogram)
+density_data <- density(ipk_data)
+density_scaled <- data.frame(
+  x = density_data$x,
+  y = density_data$y * length(ipk_data) * diff(range(ipk_data)) / 30
+)
+
+# 5. Plot highcharter
+highchart() %>%
+  hc_title(text = "Distribusi IPK Mahasiswa") %>%
+  hc_xAxis(
+    title = list(text = "IPK Terakhir"),
+    min = 1,
+    max = 5
+  ) %>%
+  hc_yAxis(title = list(text = "Jumlah Mahasiswa / Kepadatan")) %>%
+  hc_add_series(
+    name = "Jumlah Mahasiswa",
+    type = "column",
+    data = list_parse(hist_df),
+    colorByPoint = TRUE
+  ) %>%
+  hc_add_series(
+    name = "Kurva Kepadatan",
+    type = "spline",
+    data = list_parse(density_scaled),
+    color = "black",
+    marker = list(enabled = FALSE)
+  ) %>%
+  hc_plotOptions(
+    column = list(
+      pointPadding = 0.05,
+      groupPadding = 0.05,
+      borderWidth = 0
+    )
+  ) %>%
+  hc_chart(backgroundColor = "white") %>%
+  hc_legend(enabled = TRUE)
+```
+
+
+Pareto Chart
+=======================================================================
+
+  
+Column {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+  
+### Dataset Tantangan Mahasiswa
+
+```{r}
+
+# Baca dataset
+data_mahasiswa <- read.csv("dataset_daring.csv")
+
+data_pareto <- data_mahasiswa %>%
+  count(Tantangan_Utama, name = "Jumlah") %>%
+  arrange(desc(Jumlah)) %>%
+  mutate(
+    Persentase = Jumlah / sum(Jumlah),
+    Kumulatif = cumsum(Persentase),
+    Kumulatif_Persen = round(Kumulatif * 100)
+  )
+
+# Warna
+warna_bars <- viridis(n = nrow(data_pareto))
+
+# Chart
+highchart() %>%
+  hc_chart(type = "column") %>%
+  hc_title(text = "Pareto Chart: Tantangan Utama Mahasiswa") %>%
+
+  # X Axis
+  hc_xAxis(
+    categories = data_pareto$Tantangan_Utama,
+    title = list(text = "Tantangan"),
+    labels = list(rotation = -45)
+  ) %>%
+
+  # Dual Y Axis
+  hc_yAxis_multiples(
+    list(
+      title = list(text = "Frekuensi"),
+      opposite = FALSE
+    ),
+    list(
+      title = list(text = "Kumulatif (%)"),
+      labels = list(format = "{value}%"),
+      max = 100,
+      tickPositions = list(0, 20, 40, 60, 80, 100),
+      opposite = TRUE,
+      plotLines = list(
+        list(
+          value = 80,
+          color = "#32CD32",
+          width = 2,
+          dashStyle = "Dash",
+          label = list(
+            text = "80% Cut-Off",
+            align = "right",
+            verticalAlign = "top",
+            style = list(color = "#32CD32", fontWeight = "bold")
+          )
+        )
+      )
+    )
+
+  ) %>%
+
+  # Bar chart (frekuensi)
+  hc_add_series(
+    name = "Jumlah",
+    type = "column",
+    data = purrr::map2(data_pareto$Jumlah, warna_bars, ~ list(y = .x, color = .y)),
+    yAxis = 0,
+    tooltip = list(pointFormat = "<b>Jumlah:</b> {point.y}")
+  ) %>%
+
+  # Line chart (kumulatif %)
+  hc_add_series(
+    name = "Kumulatif (%)",
+    type = "line",
+    data = purrr::map(data_pareto$Kumulatif_Persen, ~ list(y = .x)),
+    yAxis = 1,
+    color = "#FF5733",
+    dashStyle = "Dash", 
+    marker = list(enabled = TRUE, symbol = "circle"),
+    dataLabels = list(enabled = FALSE),
+    tooltip = list(pointFormat = "<b>Kumulatif:</b> {point.y}%")
+  )
+
+
+```
+
+
+Scatter Diagram
+=======================================================================
+
+Column {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+
+
+### Hubungan IPK Terakhir dengan Fokus Daring Mahasiswa
+
+```{r}
+
+data <- read.csv("dataset_daring.csv")
+set.seed(123)
+data$IPK_Terakhir <- as.numeric(data$IPK_Terakhir) + rnorm(nrow(data), 0, 0.05)
+data$Fokus_Daring <- as.numeric(data$Fokus_Daring) + rnorm(nrow(data), 0, 0.1)
+
+# Hitung korelasi dan regresi
+cor_value <- cor(data$IPK_Terakhir, data$Fokus_Daring, use = "complete.obs")
+slope <- with(data, cov(IPK_Terakhir, Fokus_Daring, use = "complete.obs") / var(IPK_Terakhir, na.rm = TRUE))
+intercept <- mean(data$Fokus_Daring, na.rm = TRUE) - slope * mean(data$IPK_Terakhir, na.rm = TRUE)
+x_range <- range(data$IPK_Terakhir, na.rm = TRUE)
+trendline <- data.frame(x = x_range, y = intercept + slope * x_range)
+
+# Buat plot
+hchart(data, "scatter", hcaes(x = IPK_Terakhir, y = Fokus_Daring, color = Fokus_Daring)) %>%
+  hc_add_series(data = trendline, type = "line", name = "Trendline", color = "#FF4136", lineWidth = 2, dashStyle = "Dash") %>%
+  hc_title(text = paste("Hubungan IPK Terakhir dan Fokus Daring (r =", round(cor_value, 2), ")")) %>%
+  hc_subtitle(text = "Data Mahasiswa Pembelajaran Daring") %>%
+  hc_xAxis(title = list(text = "IPK Terakhir"), gridLineWidth = 1) %>%
+  hc_yAxis(title = list(text = "Fokus Daring"), min = 1, max = 5, gridLineWidth = 1) %>%
+  hc_colors(alpha(viridis(5), 0.7)) %>%
+  hc_plotOptions(scatter = list(marker = list(radius = 4), jitter = list(x = 0.1, y = 0.1))) %>%
+  hc_chart(width = 600, height = 400, zoomType = "xy") %>%
+  hc_tooltip(pointFormat = "<b>IPK:</b> {point.x:.2f}<br><b>Fokus Daring:</b> {point.y}") %>%
+  hc_add_theme(hc_theme_smpl())
+
+```
+
