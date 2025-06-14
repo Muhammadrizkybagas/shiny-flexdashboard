@@ -2,7 +2,7 @@
 
 Silahkan download folder `my shiny app` lalu buka foldernya. Terdapat 3 file yaitu `ui.R` `server.R` dan `global.R`
 
-## Cara Menjalankan Aplkasi
+## Cara Menjalankan Aplikasi
 
 **1. Install R Package**
 
