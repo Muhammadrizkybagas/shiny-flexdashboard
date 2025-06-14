@@ -22,6 +22,8 @@ Silahkan download folder `my shiny app` lalu buka foldernya. Terdapat 3 file yai
 
   Kalian bisa menjalankan aplikasi dengan mengklik tombol **Run App**, maka secara otomatis RStudio akan menampilkan formulir di **Panel Viewer**.
 
+  ---
+
 # Flex Dashboard Dengan 7 QC Tools
 
   Jika kalian ingin menggunakan flexdashboard untuk bagian analisis data, silahkan download folder `flex dashboard` lalu buka filenya. Bagian ini kalian akan menampilkan visualisasi dashboard interaktif yang sudah kami lakukan analisis 7 QC Tools. Analisis di tampilkan sesuai
